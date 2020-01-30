@@ -1,5 +1,5 @@
 """
-    O Arquivo de Pré-compilação para o site do Verde-Puc: http://maratona.crc.pucminas.br/
+    O Arquivo de Pré-compilação para o site do Verde-Puc
 
     Authors:
         Lusantisuper:
@@ -89,7 +89,7 @@ def AcharLibs_C (fp: str, recursive:bool = True) -> tuple:
     with open(fp, "r") as arquivo:
         
         for linha in arquivo:
-            match = re.match(r"^#\s*include\s*\"(.*)\"", linha, re.IGNORECASE)
+            match = re.match(r"^#\s*include\s*\"(.*)\"", linha)
 
             if match:
 
@@ -97,15 +97,38 @@ def AcharLibs_C (fp: str, recursive:bool = True) -> tuple:
 
                 libDir = FormatarCaminho(fpDir, biblioteca)
 
-                if not biblioteca in bibliotecas:
+                if not libDir in bibliotecas:
                     bibliotecas.append(libDir)
 
                     if recursive:
-                        bibliotecas = [*bibliotecas, *AcharLibs_C(libDir, recursive=True)]
+                        
+                        bibliotecas = [*bibliotecas, *filter(lambda x: not x in bibliotecas, AcharLibs_C(libDir, recursive=True))]
                    
 
     return tuple(bibliotecas)
 
+
+def _JuntarArquivos(fp: str, overwrite: bool = False, *arquivos:str) -> None:
+    """
+    Junta todos os arquivos em um único arquivos para pré-compilação
+
+    Args:
+        fp (str): o local do arquivo final
+        overwrite (bool) = False: Sobreescrever o arquivo se já existir
+        *arquivos (str): Os caminhos dos arquivos
+    """
+
+    with open(fp, "w") as saida:
+        for arquivoDir in arquivos:
+
+            with open(arquivoDir, "r") as arquivo:
+
+                saida.write(f"//----------------{os.path.split(arquivoDir)[1]}----------------//\n\n")
+
+                for linha in arquivo:
+                    if not re.match(r"^#\s*include\s*\"(.*)\"", linha):
+                        saida.write(linha)
+                saida.write("\n\n")
 
 
 
@@ -122,6 +145,8 @@ if __name__ == "__main__":
     LocalArquivo = os.path.split(os.path.abspath(NomeArquivo))[0]
     NomeSaida = "out.cpp" if len(sys.argv) < 3 else sys.argv[2]
 
+    
+
 
     print(__doc__)
 
@@ -129,21 +154,13 @@ if __name__ == "__main__":
     bibliotecas = AcharLibs_C(NomeArquivo, True)
 
     print("Bibliotecas encontradas:", end='\n\n')
-    for lib in set(bibliotecas):
+    for lib in bibliotecas:
         print(f"*{os.path.relpath(lib, LocalArquivo)}")
 
     print("")
-    print("Juntando arquivos", end="\n\n")
+    print("Juntando arquivos...")
     
-    with open(NomeSaida, "w") as saida:
-        for arquivoDir in (*bibliotecas, os.path.join(LocalArquivo, NomeArquivo)):
+    _JuntarArquivos(NomeSaida, True, *bibliotecas, os.path.join(LocalArquivo, NomeArquivo))
 
-            print(os.path.relpath(arquivoDir, LocalArquivo))
-
-            with open(arquivoDir, "r") as arquivo:
-                saida.write(f"//----------------{os.path.split(arquivoDir)[1]}----------------//\n\n")
-                for linha in arquivo:
-                    if not re.match(r"^#\s*include\s*\"(.*)\"", linha, re.IGNORECASE):
-                        saida.write(linha)
-                saida.write("\n\n")
+    print("Arquivos unidos com sucesso")
 
