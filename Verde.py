@@ -43,6 +43,7 @@ import sys
 import os
 
 
+
 def FormatarCaminho(start: str, relpath: str):
     """
     Junta o caminho inicial com o caminho relativo
@@ -61,74 +62,65 @@ def FormatarCaminho(start: str, relpath: str):
 
     return os.path.join(start, relpath)
 
-    
+
+def AcharLib (linha: str, fp: str) -> str:
+    match = re.match(r"^#\s*include\s*\"(.*)\"", linha)
+
+    saida = ""
+
+    if match:
+
+        biblioteca = match.group(1)
+
+        caminho = FormatarCaminho(os.path.split(os.path.abspath(fp))[0], biblioteca)
+
+        saida += f"//-----------------------Inicio da lib: {biblioteca}-----------------------//\n"
+        saida += f"{LerArquivo(caminho)}\n"
+        saida += f"//-----------------------Fim da lib: {biblioteca}-----------------------//\n"
+
+    return saida
 
 
-def AcharLibs_C (fp: str, recursive:bool = True) -> tuple:
-    """
 
-    Retorna uma tupla de bibliotecas locais
-    de um arquivo escrito na liguagem C ou C++
-
-    Args:
-     fp (str): O caminho do arquivo para ser lido
-     recursive (bool): Procura As bibliotecas locais dentro das bibliotecas importadas
-
-    Return:
-     Retorna uma tupla dos cominhos absolutos das bibliotecas
-
-     """
-    
-    if not os.path.exists(fp):
-        raise FileNotFoundError(f"Arquivo {fp} não encontrado")
-
-    bibliotecas = []
-
-    fpDir = os.path.split(os.path.abspath(fp))[0]
-
-    with open(fp, "r") as arquivo:
         
+def LerArquivo (fp: str) -> str:
+
+    if not os.path.exists(fp):
+        raise FileNotFoundError(f'Arquivo {fp} não pode ser encontrado')
+
+    saida = ""
+
+    
+    print(f"Lendo arquivo: {fp} ...")
+
+    with open(fp) as arquivo:
+        if not arquivo.readable():
+            raise IOError(f'O Arquivo {fp} não pode ser lido')
+
+
         for linha in arquivo:
-            match = re.match(r"^#\s*include\s*\"(.*)\"", linha)
 
-            if match:
+            saida += AcharLib(linha, fp) or linha
 
-                biblioteca = match.group(1)
-
-                libDir = FormatarCaminho(fpDir, biblioteca)
-
-                if not libDir in bibliotecas:
-                    bibliotecas.append(libDir)
-
-                    if recursive:
-                        
-                        bibliotecas = [*bibliotecas, *filter(lambda x: not x in bibliotecas, AcharLibs_C(libDir, recursive=True))]
-                   
-
-    return tuple(bibliotecas)
+    return saida
 
 
-def _JuntarArquivos(fp: str, overwrite: bool = False, *arquivos:str) -> None:
-    """
-    Junta todos os arquivos em um único arquivos para pré-compilação
 
-    Args:
-        fp (str): o local do arquivo final
-        overwrite (bool) = False: Sobreescrever o arquivo se já existir
-        *arquivos (str): Os caminhos dos arquivos
-    """
+def Precompilar (arquivo: str, arquivo_saida: str, overwrite: bool = False) -> None:
 
-    with open(fp, "w") as saida:
-        for arquivoDir in arquivos:
+    if not overwrite and os.path.exists(arquivo_saida):
+        raise FileExistsError(f'O arquivo "{arquivo_saida}" já existe')
 
-            with open(arquivoDir, "r") as arquivo:
 
-                saida.write(f"//----------------{os.path.split(arquivoDir)[1]}----------------//\n\n")
+    with open(arquivo_saida, 'w') as saida:
+        if not saida.writable():
+            raise IOError(f'O Arquivo "{arquivo_saida}" não pode ser escrito')
 
-                for linha in arquivo:
-                    if not re.match(r"^#\s*include\s*\"(.*)\"", linha):
-                        saida.write(linha)
-                saida.write("\n\n")
+        texto = LerArquivo(arquivo)
+
+        saida.write(texto)
+            
+
 
 
 
@@ -142,7 +134,6 @@ if __name__ == "__main__":
     if not os.path.exists(NomeArquivo):
         raise FileNotFoundError(f"O arquivo {NomeArquivo} não existe")
 
-    LocalArquivo = os.path.split(os.path.abspath(NomeArquivo))[0]
     NomeSaida = "out.cpp" if len(sys.argv) < 3 else sys.argv[2]
 
     
@@ -151,16 +142,9 @@ if __name__ == "__main__":
     print(__doc__)
 
 
-    bibliotecas = AcharLibs_C(NomeArquivo, True)
-
-    print("Bibliotecas encontradas:", end='\n\n')
-    for lib in bibliotecas:
-        print(f"*{os.path.relpath(lib, LocalArquivo)}")
-
-    print("")
     print("Juntando arquivos...")
     
-    _JuntarArquivos(NomeSaida, True, *bibliotecas, os.path.join(LocalArquivo, NomeArquivo))
+    Precompilar(NomeArquivo, NomeSaida, True)
 
     print("Arquivos unidos com sucesso")
 
