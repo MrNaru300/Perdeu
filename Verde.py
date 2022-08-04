@@ -41,7 +41,7 @@
 import re
 import sys
 import os
-
+import typer
 
 
 def FormatarCaminho(start: str, relpath: str):
