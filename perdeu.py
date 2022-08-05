@@ -38,12 +38,12 @@
 """
 
 
+from calendar import c
 from enum import Enum
+from io import TextIOWrapper
 from pathlib import Path
 import re
-import os
 from typing import List, Tuple
-from numpy import mat
 import rich
 import typer
 
@@ -55,37 +55,49 @@ class SuportedLanguages(str, Enum):
     Cpp = 'cpp'
 
 
-def _includeJava (fp: Path, dependecies_path: List[Path] = []) -> str:
-
-    if not fp.is_file():
-        raise FileNotFoundError(f'Arquivo {fp} não pode ser encontrado')
-
-    rich.print(":yellow_circle:", f"[yellow]Lendo arquivo: [bold purple]{fp}[/bold purple] ...[/yellow]")
-
-    saida = ""
+def _includeJava (arquivo: TextIOWrapper, output: TextIOWrapper, dependecies_path: List[Path] = []):
 
 
-    with open(fp) as arquivo:
+    rich.print(":yellow_circle:", f"[yellow]Lendo arquivo: [bold purple]{arquivo.name}[/bold purple] ...[/yellow]")
 
-        for dep in dependecies_path:
-            if dep.is_file():
-                deps = [dep]
-            elif dep.is_dir():
-                deps = [x for x in dep.iterdir()]
-            else:
-                raise FileNotFoundError(f'Arquivo ou pasta {fp} não pode ser encontrado')
-        
-            for d in deps:
-                with open(d) as dep_file:
-                    saida += f"""
-//-----------------------Inicio da lib: {dep_file.name}-----------------------//
-{_includeJava(dep_file)}
-//-----------------------Fim da lib: {dep_file.name}-----------------------//"""
+    arquivo_completo = arquivo.read()
+
+    classes_re = re.compile(r'(?:((?:public)|(?:abstract)|(?:final))\s+)?(class\s+([\w\d]+)\s+(?:[\w\d]+\s+)*{(?:[^{}]*(?:{[^{}]*})*)+\s*})')
+    imports_re = re.compile(r'import +((?:(?:[\w\d*]+)\.?)*);')
+
+    dep_classes = {}
+    imports = set(re.findall(imports_re, arquivo_completo))
+
+    while dependecies_path:
+        dependecy_path = dependecies_path.pop()
+        if dependecy_path.is_dir():
+            dependecies_path.extend(dependecy_path.iterdir())
+            continue
+        elif not dependecy_path.is_file():
+            raise FileNotFoundError(f'Arquivo ou pasta {arquivo} não pode ser encontrado')
+
+        with open(dependecy_path) as dependency_file:
+            file_content = dependency_file.read()
+            rich.print(":yellow_circle:", f"[yellow]Lendo arquivo: [bold purple]{dependency_file.name}[/bold purple] ...[/yellow]")
+
+            dep_classes[dependecy_path] = re.finditer(classes_re, file_content)
+            imports.update(re.findall(imports_re, file_content))
+
+
+    for imp in imports:
+        if imp.startswith('java'):
+            output.write(f'import {imp};\n')
+
+    output.write('\n')
+
+    for _class in re.finditer(classes_re, arquivo_completo):
+        output.write(_class.group(0) + '\n\n')
     
-        for linha in arquivo:
-            saida += linha
 
-    return saida
+    for dependecy_path, classes in dep_classes.items():
+        for _class in classes:
+            output.write(_class.group(0) + '\n\n')
+
 
     
 def _includeC (fp: Path) -> str:
@@ -124,10 +136,11 @@ def _includeC (fp: Path) -> str:
 
 @app.command(help="Pre-processa o arquivo adicionando as depencencias")
 def Precompilar (
-    arquivo: Path,
+    arquivo: typer.FileText,
     arquivo_saida: typer.FileTextWrite,
-    dependencia : List[Path] = [],
-    lang: SuportedLanguages = typer.Option(default=None, show_default=False, help="Qual linguagem vai ser preprocessada (será considerada a extensão do arquivo se não especificado).")) -> None:
+    dependencia : List[Path] = typer.Option([], '--dependencia', '-d', help="Arquivos ou pastas contendo dependencias para serem incluidas no arquivo"),
+    lang: SuportedLanguages = typer.Option(None, '--lang', '-l', show_default=False, help="Qual linguagem vai ser preprocessada (será considerada a extensão do arquivo se não especificado).")
+    ) -> None:
 
     if lang == None:
         lang = arquivo.name.split('.')[-1]
@@ -141,12 +154,11 @@ def Precompilar (
         case SuportedLanguages.C, SuportedLanguages.Cpp:
             arquivo_saida.write(_includeC(arquivo))
         case SuportedLanguages.Java:
-            arquivo_saida.write(_includeJava(arquivo, dependecies_path=dependencia))
+            _includeJava(arquivo, arquivo_saida, dependecies_path=dependencia)
     
     
 
     rich.print("[bold green]Arquivos unidos com sucesso[/bold green]", ":white_check_mark:")
-
 
 if __name__ == "__main__":
     app()
