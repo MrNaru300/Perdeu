@@ -46,6 +46,7 @@ import re
 from typing import List, Tuple
 import rich
 import typer
+import subprocess
 
 app = typer.Typer(short_help="Pre-processa arquivos de C, C++ e Java para enviar para o Verde")
 
@@ -60,9 +61,12 @@ def _includeJava (arquivo: TextIOWrapper, output: TextIOWrapper, dependecies_pat
 
     rich.print(":yellow_circle:", f"[yellow]Lendo arquivo: [bold purple]{arquivo.name}[/bold purple] ...[/yellow]")
 
+    if not arquivo.readable():
+        raise IOError(f"Arquivo {arquivo.name} não pode ser lido")
+    
     arquivo_completo = arquivo.read()
 
-    classes_re = re.compile(r'(?:((?:public)|(?:abstract)|(?:final))\s+)?(class\s+([\w\d]+)\s+(?:[\w\d]+\s+)*{(?:[^{}]*(?:{[^{}]*})*)+\s*})')
+    #classes_re = re.compile(r'(?:((?:public)|(?:abstract)|(?:final))\s+)?(class\s+([\w\d]+)\s+(?:[\w\d]+\s+)*{(?:[^{}]*(?:{[^{}]*})*)+\s*})')
     imports_re = re.compile(r'import +((?:(?:[\w\d*]+)\.?)*);')
 
     dep_classes = {}
@@ -78,7 +82,7 @@ def _includeJava (arquivo: TextIOWrapper, output: TextIOWrapper, dependecies_pat
 
         with open(dependecy_path) as dependency_file:
             file_content = dependency_file.read()
-            rich.print(":yellow_circle:", f"[yellow]Lendo arquivo: [bold purple]{dependency_file.name}[/bold purple] ...[/yellow]")
+            rich.print(":yellow_circle:", f"[yellow]Lendo arquivo: [bold purple]{Path.resolve(dependecy_path)}[/bold purple] ...[/yellow]")
 
             dep_classes[dependecy_path] = re.finditer(classes_re, file_content)
             imports.update(re.findall(imports_re, file_content))
@@ -88,11 +92,10 @@ def _includeJava (arquivo: TextIOWrapper, output: TextIOWrapper, dependecies_pat
         if imp.startswith('java'):
             output.write(f'import {imp};\n')
 
-    output.write('\n')
-
-    for _class in re.finditer(classes_re, arquivo_completo):
-        output.write(_class.group(0) + '\n\n')
-    
+    for line in arquivo_completo:
+        if not line.startswith('import'):
+            output.write(line)
+       
 
     for dependecy_path, classes in dep_classes.items():
         for _class in classes:
@@ -137,7 +140,7 @@ def _includeC (fp: Path) -> str:
 @app.command(help="Pre-processa o arquivo adicionando as depencencias")
 def Precompilar (
     arquivo: typer.FileText,
-    arquivo_saida: typer.FileTextWrite,
+    arquivo_saida: typer.FileTextWrite = typer.Option(None, '-o', '--output'),
     dependencia : List[Path] = typer.Option([], '--dependencia', '-d', help="Arquivos ou pastas contendo dependencias para serem incluidas no arquivo"),
     lang: SuportedLanguages = typer.Option(None, '--lang', '-l', show_default=False, help="Qual linguagem vai ser preprocessada (será considerada a extensão do arquivo se não especificado).")
     ) -> None:
@@ -145,7 +148,12 @@ def Precompilar (
     if lang == None:
         lang = arquivo.name.split('.')[-1]
 
+    if arquivo_saida == None:
+        arquivo_saida = open("saida."+lang, "w")
+
+
     rich.print("[bold yellow]Tipo de arquivo:[/bold yellow]", f"[blue].{lang}[/blue]")
+    rich.print("[bold yellow]Arquivo de saida:[/bold yellow]", f"[blue]{arquivo_saida.name}[/blue]")
 
     rich.print("[bold green]Juntando arquivos...[/bold green]", ":page_facing_up:")
 
@@ -159,6 +167,45 @@ def Precompilar (
     
 
     rich.print("[bold green]Arquivos unidos com sucesso[/bold green]", ":white_check_mark:")
+
+@app.command(help="compila ")
+def compilar(
+    path : Path,
+    output_file: Path = "",
+    CCompiler : str ='gcc',
+    CppCompiler : str = 'g++',
+    JavaCompiler : str ='java',
+    ):
+
+    paths = [path]
+
+    while paths:
+        file = paths.pop()
+        if file.is_dir():
+            paths.extend(file.resolve().iterdir())
+        elif file.is_file():
+            match file.suffix.lstrip('.'):
+                case SuportedLanguages.Java:
+                    subprocess.call([JavaCompiler, path]
+                    .extend((['-d', output_file]) if output_file != "" else []))
+                case SuportedLanguages.C:
+                    subprocess.call([CCompiler, path]
+                    .extend((['-o', output_file]) if output_file != "" else []))
+                case SuportedLanguages.Cpp:
+                    subprocess.call([CppCompiler, path]
+                    .extend((['-o', output_file]) if output_file != "" else []))
+                    
+            
+
+
+
+@app.command(help="observa atualização dos diretórios e recompila os arquivos")
+def watch(
+    CCompiler : str ='gcc',
+    CppCompiler : str = 'g++',
+    JavaCompiler='java'
+    ):
+    pass
 
 if __name__ == "__main__":
     app()
