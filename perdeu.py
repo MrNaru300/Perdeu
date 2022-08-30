@@ -38,17 +38,19 @@
 """
 
 
-from calendar import c
 from enum import Enum
 from io import TextIOWrapper
 from pathlib import Path
 import re
-from typing import List, Tuple
+from typing import List
 import rich
 import typer
 import subprocess
+import javalang
 
 app = typer.Typer(short_help="Pre-processa arquivos de C, C++ e Java para enviar para o Verde")
+
+
 
 class SuportedLanguages(str, Enum):
     Java = 'java'
@@ -56,59 +58,48 @@ class SuportedLanguages(str, Enum):
     Cpp = 'cpp'
 
 
-def _includeJava (arquivo: TextIOWrapper, output: TextIOWrapper, dependecies_path: List[Path] = []):
+def _includeJava (arquivo: typer.FileText, output: typer.FileTextWrite, dependecies_path: List[Path] = []):
 
 
     rich.print(":yellow_circle:", f"[yellow]Lendo arquivo: [bold purple]{arquivo.name}[/bold purple] ...[/yellow]")
 
-    if not arquivo.readable():
-        raise IOError(f"Arquivo {arquivo.name} não pode ser lido")
-    
-    arquivo_completo = arquivo.read()
-
-    #classes_re = re.compile(r'(?:((?:public)|(?:abstract)|(?:final))\s+)?(class\s+([\w\d]+)\s+(?:[\w\d]+\s+)*{(?:[^{}]*(?:{[^{}]*})*)+\s*})')
-    imports_re = re.compile(r'import +((?:(?:[\w\d*]+)\.?)*);')
-
-    dep_classes = {}
-    imports = set(re.findall(imports_re, arquivo_completo))
-
-    while dependecies_path:
-        dependecy_path = dependecies_path.pop()
-        if dependecy_path.is_dir():
-            dependecies_path.extend(dependecy_path.iterdir())
-            continue
-        elif not dependecy_path.is_file():
-            raise FileNotFoundError(f'Arquivo ou pasta {arquivo} não pode ser encontrado')
-
-        with open(dependecy_path) as dependency_file:
-            file_content = dependency_file.read()
-            rich.print(":yellow_circle:", f"[yellow]Lendo arquivo: [bold purple]{Path.resolve(dependecy_path)}[/bold purple] ...[/yellow]")
-
-            dep_classes[dependecy_path] = re.finditer(classes_re, file_content)
-            imports.update(re.findall(imports_re, file_content))
+    #All package names maped to source files
+    dependecies_srcs = {}
 
 
-    for imp in imports:
-        if imp.startswith('java'):
-            output.write(f'import {imp};\n')
+    #Find all dependencies source files
+    for dp in dependecies_path:
+        if dp.is_dir():
+            for src_path in dp.glob('*/*.java'):
+                #Maps a path into a package name
+                dependecies_srcs[src_path.relative_to(dp).with_suffix('').replace('/', '.')] = src_path
+        
 
-    for line in arquivo_completo:
-        if not line.startswith('import'):
-            output.write(line)
-       
+    classes = [] #All classes
+    imported = set() #All already imported packages
+    tree = javalang.parse.parse(arquivo.read())
 
-    for dependecy_path, classes in dep_classes.items():
-        for _class in classes:
-            output.write(_class.group(0) + '\n\n')
+    for imp in tree.imports:
+
+        if imp.path not in imported:
+            if not imp.path.startswith("java."):
+                if imp.path in dependecies_srcs:
+                    with open(dependecies_srcs[imp.path], 'r') as dep_arq:
+                        rich.print(":yellow_circle:", f"[yellow]Lendo arquivo: [bold purple]{Path.resolve(imp.path)}[/bold purple] ...[/yellow]")
+                        #TODO Recursive imports
+                else:
+                    raise FileNotFoundError(f"Importação do Pacote {imp.path} não encontrado no CLASSPATH!")
+        else:
+            imported.add(imp.path)
+
+    classes.extend(tree)
 
 
     
-def _includeC (fp: Path) -> str:
+def _includeC (fp: Path, output : typer.FileTextWrite) -> str:
 
     if not fp.is_file():
         raise FileNotFoundError(f'Arquivo {fp} não pode ser encontrado')
-
-    saida = ""
 
     
     rich.print(":yellow_circle:", f"[yellow]Lendo arquivo: [bold purple]{fp}[/bold purple] ...[/yellow]")
@@ -127,23 +118,22 @@ def _includeC (fp: Path) -> str:
 
                 caminho = fp.parent.joinpath(biblioteca).resolve()
 
-                saida += f"//-----------------------Inicio da lib: {biblioteca}-----------------------//\n"
-                saida += f"{_includeC(caminho)}\n"
-                saida += f"//-----------------------Fim da lib: {biblioteca}-----------------------//\n"
+                output.write(f"//----------------------- Lib: {biblioteca}-----------------------//\n")
+                _includeC(caminho, output)
+                output.write("\n\n")
 
             else:
-                saida += linha
-
-    return saida
+                output.write(linha)
 
 
 @app.command(help="Pre-processa o arquivo adicionando as depencencias")
 def Precompilar (
     arquivo: typer.FileText,
     arquivo_saida: typer.FileTextWrite = typer.Option(None, '-o', '--output'),
-    dependencia : List[Path] = typer.Option([], '--dependencia', '-d', help="Arquivos ou pastas contendo dependencias para serem incluidas no arquivo"),
+    dependencias : List[Path] = typer.Option([], '--dependencias', '-d',  help="Arquivos ou pastas contendo dependencias para serem incluidas no arquivo", envvar='CLASSPATH'),
     lang: SuportedLanguages = typer.Option(None, '--lang', '-l', show_default=False, help="Qual linguagem vai ser preprocessada (será considerada a extensão do arquivo se não especificado).")
     ) -> None:
+
 
     if lang == None:
         lang = arquivo.name.split('.')[-1]
@@ -160,9 +150,11 @@ def Precompilar (
 
     match lang:
         case SuportedLanguages.C, SuportedLanguages.Cpp:
-            arquivo_saida.write(_includeC(arquivo))
+            _includeC(arquivo, arquivo_saida)
         case SuportedLanguages.Java:
-            _includeJava(arquivo, arquivo_saida, dependecies_path=dependencia)
+            _includeJava(arquivo, arquivo_saida, dependecies_path=dependencias)
+
+    arquivo_saida.close()
     
     
 
