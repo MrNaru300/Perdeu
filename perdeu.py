@@ -96,7 +96,7 @@ def _includeJava (arquivo: typer.FileText, output: typer.FileTextWrite, dependec
 
 
     
-def _includeC (fp: Path, output : typer.FileTextWrite) -> str:
+def _includeC (fp: Path, output : typer.FileTextWrite):
 
     if not fp.is_file():
         raise FileNotFoundError(f'Arquivo {fp} não pode ser encontrado')
